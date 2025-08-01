@@ -1,6 +1,6 @@
 /*
 goprof is a convenience wrapper around go's pprof library.
-If you need control profiling, don't use this.
+If you need more control when profiling, don't use this.
 There are three main ways to use this package.
 
 1. Targets to a specific bit of code
@@ -15,7 +15,7 @@ There are three main ways to use this package.
 		// handle error
 	}
 
-<your code here>
+	<your code here>
 
 	if err := goprof.End(); err != nil {
 		// handle error
@@ -23,8 +23,8 @@ There are three main ways to use this package.
 
 3. Profile all your code. At the beginning of your main method, just call:
 
-goprof.Start("<name>")
-defer goprof.End()
+	goprof.Start("<name>")
+	defer goprof.End()
 */
 package goprof
 
@@ -38,6 +38,19 @@ import (
 	"time"
 )
 
+func cpuName(name string) string {
+	return fmt.Sprintf("%s.cpu.pprof", name)
+}
+func blockName(name string) string {
+	return fmt.Sprintf("%s.block.prof", name)
+}
+func traceName(name string) string {
+	return fmt.Sprintf("%s.trace.out", name)
+}
+func heapName(name string) string {
+	return fmt.Sprintf("%s.heap.prof", name)
+}
+
 type profiler struct {
 	start time.Time
 	end   time.Time
@@ -50,12 +63,11 @@ type profiler struct {
 }
 
 var ErrAlreadyStarted = errors.New("profiler already started")
+var ErrNotStarted = errors.New("profiler has not been started")
 
-func (p *profiler) started() error {
-	if !p.start.IsZero() && !p.end.IsZero() {
-		return ErrAlreadyStarted
-	}
-	return nil
+// true if started
+func (p *profiler) started() bool {
+	return !p.start.IsZero() && !p.end.IsZero()
 }
 
 func (p *profiler) duration() time.Duration {
@@ -65,25 +77,25 @@ func (p *profiler) duration() time.Duration {
 var p profiler
 
 func setupFiles(name string) error {
-	cpu, err := os.Create(fmt.Sprintf("%s.cpu.pprof", name))
+	cpu, err := os.Create(cpuName(name))
 	if err != nil {
 		return err
 	}
 	p.cpu = cpu
 
-	block, err := os.Create(fmt.Sprintf("%s.block.prof", name))
+	block, err := os.Create(blockName(name))
 	if err != nil {
 		return err
 	}
 	p.block = block
 
-	trace, err := os.Create(fmt.Sprintf("%s.trace.out", name))
+	trace, err := os.Create(traceName(name))
 	if err != nil {
 		return err
 	}
 	p.trace = trace
 
-	heap, err := os.Create(fmt.Sprintf("%s.heap.prof", name))
+	heap, err := os.Create(heapName(name))
 	if err != nil {
 		return err
 	}
@@ -107,10 +119,11 @@ func cleanupFiles() error {
 	return nil
 }
 
-// name is optional; if name is an empty string, will populate with a time stamp
+// name is optional;
+// if name is an empty string, will populate with a time stamp
 func Start(name string) error {
-	if err := p.started(); err != nil {
-		return err
+	if p.started() {
+		return ErrAlreadyStarted
 	}
 
 	if name == "" {
@@ -137,6 +150,9 @@ func Start(name string) error {
 }
 
 func Stop() error {
+	if !p.started() {
+		return ErrNotStarted
+	}
 	// run this first; we don't want tear down to affect total time
 	p.end = time.Now()
 	pprof.StopCPUProfile()
@@ -167,4 +183,13 @@ func Run(name string, f func()) error {
 
 func Summarize() {
 	fmt.Println(p.duration())
+}
+
+// print the commands to call for pprof
+func Commands(name string) {
+	fmt.Printf("go tool pprof %s\n", cpuName(name))
+	fmt.Printf("go tool pprof -http=:6060 %s\n", cpuName(name))
+	fmt.Printf("go tool trace %s\n", traceName(name))
+	fmt.Printf("go tool pprof %s\n", blockName(name))
+	fmt.Printf("go tool pprof %s\n", heapName(name))
 }
